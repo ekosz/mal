@@ -20,7 +20,9 @@
     "test:step9": "cd ../.. && make 'test^rescript^step9'",
     "test:stepA": "cd ../.. && make 'test^rescript^stepA'"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@ryyppy/rescript-promise": "^2.1.0"
+  },
   "devDependencies": {
     "rescript": "^9.1.4"
   }

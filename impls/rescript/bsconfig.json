@@ -12,5 +12,5 @@
     }
   ],
   "suffix": ".bs.js",
-  "bs-dependencies": []
+  "bs-dependencies": ["@ryyppy/rescript-promise"]
 }

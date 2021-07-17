@@ -1,11 +1,11 @@
-STEPS =
+STEPS = step0_repl
 
 all: res
 
 node_modules:
 	npm install
 
-src/step%.bs.js: node_modules src/step%.res
+src/step%.bs.js: node_modules Readline.res src/step%.res
 	./node_modules/.bin/rescript build
 
 .PHONY: res clean
