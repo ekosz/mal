@@ -5,4 +5,4 @@ type readError =
   | SyntaxError(int)
   | EOF
 
-let readStr: string => result<Ast.t, readError>
+let readStr: string => result<Types.mal_type, readError>

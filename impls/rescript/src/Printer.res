@@ -1,21 +1,13 @@
-let rec printAst = (ast: Ast.t): string => {
+module T = Types.Types
+
+let rec printAst = (ast: Types.mal_type): string => {
   switch ast {
-  | {data: MalList(x)} => "(" ++ x->Js.Array2.map(printAst)->Js.Array2.joinWith(" ") ++ ")"
-  | {data: MalVector(x)} => "[" ++ x->Js.Array2.map(printAst)->Js.Array2.joinWith(" ") ++ "]"
-  | {data: MalHashMap(x)} =>
-    "{" ++
-    x
-    ->Js.Array2.map(({key, value}) => {
-      printAst(key) ++ " " ++ printAst(value)
-    })
-    ->Js.Array2.joinWith(" ") ++ "}"
-  | {data: MalQuote(x)} => "(quote " ++ printAst(x) ++ ")"
-  | {data: MalQuasiQuote(x)} => "(quasiquote " ++ printAst(x) ++ ")"
-  | {data: MalUnquote(x)} => "(unquote " ++ printAst(x) ++ ")"
-  | {data: MalSpliceUnquote(x)} => "(splice-unquote " ++ printAst(x) ++ ")"
-  | {data: MalDeref(x)} => "(deref " ++ printAst(x) ++ ")"
-  | {data: MalWithMeta(x, y)} => "(with-meta " ++ printAst(y) ++ " " ++ printAst(x) ++ ")"
-  | {data: MalString(x)} =>
+  | T.List({value: x}) => "(" ++ x->Js.Array2.map(printAst)->Js.Array2.joinWith(" ") ++ ")"
+  | T.Vector({value: x}) => "[" ++ x->Js.Array2.map(printAst)->Js.Array2.joinWith(" ") ++ "]"
+  | T.Map({value: x}) => "{" ++ Types.MalMap.fold((key, val, acc) => {
+      acc ++ (acc === "" ? "" : " ") ++ printAst(key) ++ " " ++ printAst(val)
+    }, x, "") ++ "}"
+  | T.String(x) =>
     "\"" ++
     {
       open Js.String2
@@ -24,13 +16,14 @@ let rec printAst = (ast: Ast.t): string => {
       ->replaceByRe(%re("/\"/g"), "\\\"")
       ->replaceByRe(%re("/\\n/g"), "\\n")
     } ++ "\""
-  | {data: MalInt(x)} => x->string_of_int
-  | {data: MalFloat(x)} => x->Js.Float.toString
-  | {data: MalTrue} => "true"
-  | {data: MalFalse} => "false"
-  | {data: MalNil} => "nil"
-  | {data: MalKeyword(x)} => ":" ++ x
-  | {data: MalSymbol(x)} => x
+  | T.Symbol({value: x}) => x
+  | T.Int(x) => x->string_of_int
+  | T.Float(x) => x->Js.Float.toString
+  | T.True => "true"
+  | T.False => "false"
+  | T.Nil => "nil"
+  | T.Keyword(x) => ":" ++ x
+  | T.Fn(_) => ""
   }
 }
 
@@ -41,5 +34,12 @@ let printReadError = (err: Reader.readError): string => {
   | BadFloat(pos) => "ERR: Cannot parse float at pos " ++ pos->string_of_int
   | SyntaxError(pos) => "ERR: Unknown syntax error somewhere around pos " ++ pos->string_of_int
   | EOF => "ERR: Unexpected EOF"
+  }
+}
+
+let printEvalError = (err: Eval.evalError): string => {
+  switch err {
+  | Eval.SymbolNotFound(name) => `ERR: Cannot find symbol "${name}"`
+  | RuntimeError(message) => `Runtime ERR: "${message}"`
   }
 }
