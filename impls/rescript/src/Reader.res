@@ -159,15 +159,27 @@ let tokenize = (str: string): result<array<token>, readError> => {
 }
 
 type rec ast = {loc: int, data: malType}
+and hash = {
+  key: ast,
+  value: ast,
+}
 and malType =
   | MalList(array<ast>)
+  | MalVector(array<ast>)
+  | MalHashMap(array<hash>)
+  | MalQuote(ast)
+  | MalQuasiQuote(ast)
+  | MalUnquote(ast)
+  | MalSpliceUnquote(ast)
+  | MalDeref(ast)
+  | MalWithMeta(ast, ast)
   | MalString(string)
   | MalInt(int)
   | MalFloat(float)
   | MalTrue
   | MalFalse
   | MalNil
-  | MalSpliceUnquote
+  | MalKeyword(string)
   | MalAtom(string)
 
 type reader = {pos: int, tokens: array<token>}
@@ -183,6 +195,7 @@ let make = input =>
   }
 let peek = reader => reader.tokens->Belt.Array.get(reader.pos)
 let next = reader => (reader->peek, {...reader, pos: reader.pos + 1})
+let inc = reader => {...reader, pos: reader.pos + 1}
 let readAtom = (reader: reader): readRes => {
   let read = (token: token) =>
     switch token {
@@ -201,11 +214,15 @@ let readAtom = (reader: reader): readRes => {
     | {loc, data: Int(x)} => {loc: loc, data: MalInt(x->int_of_string)}
     | {loc, data: Float(x)} => {loc: loc, data: MalFloat(x->float_of_string)}
     | {loc, data: SpecialChar(x)} => {loc: loc, data: MalAtom(String.make(1, x))}
-    | {loc, data: SpliceUnquote} => {loc: loc, data: MalSpliceUnquote}
+    | {loc, data: SpliceUnquote} => {loc: loc, data: MalAtom("~@")}
     | {data: Comment(_)} => Js.Exn.raiseError("Comment found in tokens")
     | {loc, data: Symbol("true")} => {loc: loc, data: MalTrue}
     | {loc, data: Symbol("false")} => {loc: loc, data: MalFalse}
     | {loc, data: Symbol("nil")} => {loc: loc, data: MalNil}
+    | {loc, data: Symbol(x)} if x->String.get(0) === ':' => {
+        loc: loc,
+        data: MalKeyword(x->Js.String2.substr(~from=1)),
+      }
     | {loc, data: Symbol(x)} => {loc: loc, data: MalAtom(x)}
     }
   switch reader->next {
@@ -217,19 +234,93 @@ let readAtom = (reader: reader): readRes => {
 let rec readForm = (reader: reader): readRes => {
   switch reader->peek {
   | None => Error(EOF)
-  | Some({loc, data: SpecialChar('(')}) => {...reader, pos: reader.pos + 1}->readList(loc)
+  | Some({data: SpecialChar('(')} as x) => reader->readList(x)
+  | Some({data: SpecialChar('[')} as x) => reader->readVector(x)
+  | Some({data: SpecialChar('{')} as x) => reader->readHashMap(x)
+  | Some({data: SpecialChar('\'')} as x) => reader->readQuote(x)
+  | Some({data: SpecialChar('`')} as x) => reader->readQuasiQuote(x)
+  | Some({data: SpecialChar('~')} as x) => reader->readUnquote(x)
+  | Some({data: SpecialChar('@')} as x) => reader->readDeref(x)
+  | Some({data: SpecialChar('^')} as x) => reader->readWithMeta(x)
+  | Some({data: SpliceUnquote} as x) => reader->readSpliceUnquote(x)
   | Some(_) => reader->readAtom
   }
 }
-and readList = (reader, loc): readRes => {
+and readList = (reader, node): readRes => {
   let rec doReadList = (reader, nodes: array<ast>) => {
     switch reader->readForm {
     | Error(_) as x => x
-    | Ok({data: MalAtom(")")}, nextReader) => Ok({loc: loc, data: MalList(nodes)}, nextReader)
+    | Ok({data: MalAtom(")")}, nextReader) => Ok({loc: node.loc, data: MalList(nodes)}, nextReader)
     | Ok(node, nextReader) => nextReader->doReadList(nodes->push(node))
     }
   }
-  doReadList(reader, [])
+  doReadList(reader->inc, [])
+}
+and readVector = (reader, node): readRes => {
+  let rec doReadVector = (reader, nodes: array<ast>) => {
+    switch reader->readForm {
+    | Error(_) as x => x
+    | Ok({data: MalAtom("]")}, nextReader) =>
+      Ok({loc: node.loc, data: MalVector(nodes)}, nextReader)
+    | Ok(node, nextReader) => nextReader->doReadVector(nodes->push(node))
+    }
+  }
+  doReadVector(reader->inc, [])
+}
+and readHashMap = (reader, node): readRes => {
+  let rec doReadHashMap = (reader, nodes: array<hash>) => {
+    switch reader->readForm {
+    | Error(_) as x => x
+    | Ok({data: MalAtom("}")}, nextReader) =>
+      Ok({loc: node.loc, data: MalHashMap(nodes)}, nextReader)
+    | Ok(key, nextReader) =>
+      switch nextReader->readForm {
+      | Error(_) as x => x
+      | Ok(value, finalReader) => finalReader->doReadHashMap(nodes->push({key: key, value: value}))
+      }
+    }
+  }
+  doReadHashMap(reader->inc, [])
+}
+and readQuote = (reader, node): readRes => {
+  switch reader->inc->readForm {
+  | Ok(nextNode, nextReader) => Ok({loc: node.loc, data: MalQuote(nextNode)}, nextReader)
+  | Error(_) as x => x
+  }
+}
+and readQuasiQuote = (reader, node): readRes => {
+  switch reader->inc->readForm {
+  | Ok(nextNode, nextReader) => Ok({loc: node.loc, data: MalQuasiQuote(nextNode)}, nextReader)
+  | Error(_) as x => x
+  }
+}
+and readUnquote = (reader, node): readRes => {
+  switch reader->inc->readForm {
+  | Ok(nextNode, nextReader) => Ok({loc: node.loc, data: MalUnquote(nextNode)}, nextReader)
+  | Error(_) as x => x
+  }
+}
+and readSpliceUnquote = (reader, node): readRes => {
+  switch reader->inc->readForm {
+  | Ok(nextNode, nextReader) => Ok({loc: node.loc, data: MalSpliceUnquote(nextNode)}, nextReader)
+  | Error(_) as x => x
+  }
+}
+and readDeref = (reader, node): readRes => {
+  switch reader->inc->readForm {
+  | Ok(nextNode, nextReader) => Ok({loc: node.loc, data: MalDeref(nextNode)}, nextReader)
+  | Error(_) as x => x
+  }
+}
+and readWithMeta = (reader, node): readRes => {
+  switch reader->inc->readForm {
+  | Ok(meta, nextReader) =>
+    switch nextReader->readForm {
+    | Ok(value, finalReader) => Ok({loc: node.loc, data: MalWithMeta(meta, value)}, finalReader)
+    | Error(_) as x => x
+    }
+  | Error(_) as x => x
+  }
 }
 
 let readStr = (input: string): result<ast, readError> => {
