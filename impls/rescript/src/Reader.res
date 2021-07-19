@@ -1,18 +1,27 @@
 type tokenType =
   | SpliceUnquote
-  | SpecialChar(char)
+  | OpenParen
+  | CloseParen
+  | OpenBrace
+  | CloseBrace
+  | OpenBracket
+  | CloseBracket
+  | Quote
+  | BackQuote
+  | Tilde
+  | Caret
+  | AtSign
   | String(string)
   | Int(string)
   | Float(string)
   | Comment(string)
-  | Symbol(string)
+  | Bare(string)
 
 type token = {loc: int, data: tokenType}
 type readError =
   | UnmatchedString(int)
   | BadInt(int)
   | BadFloat(int)
-  | BadSymbol(int)
   | SyntaxError(int)
   | EOF
 
@@ -70,13 +79,12 @@ let tokenize = (str: string): result<array<token>, readError> => {
       switch currentToken {
       | None => Ok(tokens)
       | Some({loc, data: String(_)}) => Error(UnmatchedString(loc))
-      | Some({data: SpliceUnquote}) => Js.Exn.raiseError("Ended tokenize with SpliceUnquote token")
-      | Some({data: SpecialChar(_)}) => Js.Exn.raiseError("Ended tokenize with SpecialChar token")
       | Some({data: Float(_)} as x)
-      | Some({data: Symbol(_)} as x)
+      | Some({data: Bare(_)} as x)
       | Some({data: Int(_)} as x) =>
         Ok(tokens->push(x))
       | Some({data: Comment(_)}) => Ok(tokens)
+      | Some(_) => Js.Exn.raiseError("Ended tokenize with bad token")
       }
     } else {
       switch (currentToken, str->String.get(idx)) {
@@ -85,9 +93,18 @@ let tokenize = (str: string): result<array<token>, readError> => {
       // SpliceUnquote "~@"
       | (None, '~') if str->String.get(idx + 1) === '@' =>
         doTokenize(idx + 2, None, tokens->push({loc: idx, data: SpliceUnquote}))
-      // SpecialChar
-      | (None, _ as x) if x->isSpecialChar =>
-        doTokenize(idx + 1, None, tokens->push({loc: idx, data: SpecialChar(x)}))
+      // Special Chars
+      | (None, '(') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: OpenParen}))
+      | (None, ')') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: CloseParen}))
+      | (None, '[') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: OpenBracket}))
+      | (None, ']') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: CloseBracket}))
+      | (None, '{') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: OpenBrace}))
+      | (None, '}') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: CloseBrace}))
+      | (None, '\'') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: Quote}))
+      | (None, '`') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: BackQuote}))
+      | (None, '~') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: Tilde}))
+      | (None, '^') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: Caret}))
+      | (None, '@') => doTokenize(idx + 1, None, tokens->push({loc: idx, data: AtSign}))
       // Enter String
       | (None, '"') => doTokenize(idx + 1, Some({loc: idx, data: String("")}), tokens)
       // Enter Comment
@@ -98,9 +115,9 @@ let tokenize = (str: string): result<array<token>, readError> => {
       | (None, '-' as x)
         if idx !== str->Js.String2.length - 1 && str->String.get(idx + 1)->isNumericChar =>
         doTokenize(idx + 1, Some({loc: idx, data: Int(String.make(1, x))}), tokens)
-      // Enter Symbol
+      // Enter Bare
       | (None, _ as x) =>
-        doTokenize(idx + 1, Some({loc: idx, data: Symbol(String.make(1, x))}), tokens)
+        doTokenize(idx + 1, Some({loc: idx, data: Bare(String.make(1, x))}), tokens)
       // Enter Float
       | (Some({data: Int(x)} as y), '.' as z) =>
         doTokenize(idx + 1, Some({...y, data: Float(x->concat(z))}), tokens)
@@ -126,8 +143,7 @@ let tokenize = (str: string): result<array<token>, readError> => {
         doTokenize(idx + 1, Some({loc: idx, data: Comment("")}), tokens->push(y))
       | (Some({data: Int(_)} as y), z) if z->isWhiteSpace =>
         doTokenize(idx + 1, None, tokens->push(y))
-      | (Some({data: Int(_)} as y), z) if z->isSpecialChar =>
-        doTokenize(idx + 1, None, tokens->push(y)->push({loc: idx, data: SpecialChar(z)}))
+      | (Some({data: Int(_)} as y), z) if z->isSpecialChar => doTokenize(idx, None, tokens->push(y))
       | (Some({loc, data: Int(_)}), _) => Error(BadInt(loc))
       // Float
       | (Some({data: Float(x)} as y), z) if z->isNumericChar =>
@@ -139,18 +155,19 @@ let tokenize = (str: string): result<array<token>, readError> => {
       | (Some({data: Float(_)} as y), z) if z->isWhiteSpace =>
         doTokenize(idx + 1, None, tokens->push(y))
       | (Some({data: Float(_)} as y), z) if z->isSpecialChar =>
-        doTokenize(idx + 1, None, tokens->push(y)->push({loc: idx, data: SpecialChar(z)}))
+        doTokenize(idx, None, tokens->push(y))
       | (Some({loc, data: Float(_)}), _) => Error(BadFloat(loc))
-      // Symbol
-      | (Some({data: Symbol(_)} as y), z) if z->isSpecialChar =>
-        doTokenize(idx + 1, None, tokens->push(y)->push({loc: idx, data: SpecialChar(z)}))
-      | (Some({data: Symbol(_)} as y), z) if z->isWhiteSpace =>
+      // Bare
+      | (Some({data: Bare(_)} as y), z) if z->isSpecialChar =>
+        doTokenize(idx, None, tokens->push(y))
+      | (Some({data: Bare(_)} as y), z) if z->isWhiteSpace =>
         doTokenize(idx + 1, None, tokens->push(y))
-      | (Some({data: Symbol(x)} as y), z) =>
-        doTokenize(idx + 1, Some({...y, data: Symbol(x->concat(z))}), tokens)
-      // Shouldn't get to these
-      | (Some({data: SpecialChar(_)}), _) => Js.Exn.raiseError("SpecialChar durring tokenize")
-      | (Some({data: SpliceUnquote}), _) => Js.Exn.raiseError("SpliceUnquote durring tokenize")
+      | (Some({data: Bare(x)} as y), z) =>
+        doTokenize(idx + 1, Some({...y, data: Bare(x->concat(z))}), tokens)
+      | (Some(x), _) => {
+          Logger.debug2("Bad currentToken at " ++ idx->string_of_int, x)
+          Js.Exn.raiseError("Got bad currentToken while tokenizing")
+        }
       }
     }
   }
@@ -158,32 +175,8 @@ let tokenize = (str: string): result<array<token>, readError> => {
   doTokenize(0, None, [])
 }
 
-type rec ast = {loc: int, data: malType}
-and hash = {
-  key: ast,
-  value: ast,
-}
-and malType =
-  | MalList(array<ast>)
-  | MalVector(array<ast>)
-  | MalHashMap(array<hash>)
-  | MalQuote(ast)
-  | MalQuasiQuote(ast)
-  | MalUnquote(ast)
-  | MalSpliceUnquote(ast)
-  | MalDeref(ast)
-  | MalWithMeta(ast, ast)
-  | MalString(string)
-  | MalInt(int)
-  | MalFloat(float)
-  | MalTrue
-  | MalFalse
-  | MalNil
-  | MalKeyword(string)
-  | MalAtom(string)
-
 type reader = {pos: int, tokens: array<token>}
-type readRes = result<(ast, reader), readError>
+type readRes = result<(Ast.t, reader), readError>
 
 let make = input =>
   switch tokenize(input) {
@@ -197,7 +190,7 @@ let peek = reader => reader.tokens->Belt.Array.get(reader.pos)
 let next = reader => (reader->peek, {...reader, pos: reader.pos + 1})
 let inc = reader => {...reader, pos: reader.pos + 1}
 let readAtom = (reader: reader): readRes => {
-  let read = (token: token) =>
+  let read = (token: token): Ast.t =>
     switch token {
     | {loc, data: String(x)} => {
         Logger.debug2("Cleaning string", x)
@@ -211,19 +204,17 @@ let readAtom = (reader: reader): readRes => {
           ),
         }
       }
-    | {loc, data: Int(x)} => {loc: loc, data: MalInt(x->int_of_string)}
+    | {loc, data: Int(x)} => {loc: loc, data: Ast.MalInt(x->int_of_string)}
     | {loc, data: Float(x)} => {loc: loc, data: MalFloat(x->float_of_string)}
-    | {loc, data: SpecialChar(x)} => {loc: loc, data: MalAtom(String.make(1, x))}
-    | {loc, data: SpliceUnquote} => {loc: loc, data: MalAtom("~@")}
-    | {data: Comment(_)} => Js.Exn.raiseError("Comment found in tokens")
-    | {loc, data: Symbol("true")} => {loc: loc, data: MalTrue}
-    | {loc, data: Symbol("false")} => {loc: loc, data: MalFalse}
-    | {loc, data: Symbol("nil")} => {loc: loc, data: MalNil}
-    | {loc, data: Symbol(x)} if x->String.get(0) === ':' => {
+    | {loc, data: Bare("true")} => {loc: loc, data: MalTrue}
+    | {loc, data: Bare("false")} => {loc: loc, data: MalFalse}
+    | {loc, data: Bare("nil")} => {loc: loc, data: MalNil}
+    | {loc, data: Bare(x)} if x->String.get(0) === ':' => {
         loc: loc,
-        data: MalKeyword(x->Js.String2.substr(~from=1)),
+        data: Ast.MalKeyword(x->Js.String2.substr(~from=1)),
       }
-    | {loc, data: Symbol(x)} => {loc: loc, data: MalAtom(x)}
+    | {loc, data: Bare(x)} => {loc: loc, data: MalSymbol(x)}
+    | _ => Js.Exn.raiseError("Called readAtom with non-atom token")
     }
   switch reader->next {
   | (None, _) => Error(EOF)
@@ -234,49 +225,60 @@ let readAtom = (reader: reader): readRes => {
 let rec readForm = (reader: reader): readRes => {
   switch reader->peek {
   | None => Error(EOF)
-  | Some({data: SpecialChar('(')} as x) => reader->readList(x)
-  | Some({data: SpecialChar('[')} as x) => reader->readVector(x)
-  | Some({data: SpecialChar('{')} as x) => reader->readHashMap(x)
-  | Some({data: SpecialChar('\'')} as x) => reader->readQuote(x)
-  | Some({data: SpecialChar('`')} as x) => reader->readQuasiQuote(x)
-  | Some({data: SpecialChar('~')} as x) => reader->readUnquote(x)
-  | Some({data: SpecialChar('@')} as x) => reader->readDeref(x)
-  | Some({data: SpecialChar('^')} as x) => reader->readWithMeta(x)
+  | Some({data: OpenParen} as x) => reader->readList(x)
+  | Some({data: OpenBracket} as x) => reader->readVector(x)
+  | Some({data: OpenBrace} as x) => reader->readHashMap(x)
+  | Some({data: Quote} as x) => reader->readQuote(x)
+  | Some({data: BackQuote} as x) => reader->readQuasiQuote(x)
+  | Some({data: Tilde} as x) => reader->readUnquote(x)
+  | Some({data: AtSign} as x) => reader->readDeref(x)
+  | Some({data: Caret} as x) => reader->readWithMeta(x)
   | Some({data: SpliceUnquote} as x) => reader->readSpliceUnquote(x)
   | Some(_) => reader->readAtom
   }
 }
 and readList = (reader, node): readRes => {
-  let rec doReadList = (reader, nodes: array<ast>) => {
-    switch reader->readForm {
-    | Error(_) as x => x
-    | Ok({data: MalAtom(")")}, nextReader) => Ok({loc: node.loc, data: MalList(nodes)}, nextReader)
-    | Ok(node, nextReader) => nextReader->doReadList(nodes->push(node))
+  let rec doReadList = (reader, nodes: array<Ast.t>): readRes => {
+    switch reader->peek {
+    | None => Error(EOF)
+    | Some({data: CloseParen}) => Ok({loc: node.loc, data: MalList(nodes)}, reader->inc)
+    | Some(_) =>
+      switch reader->readForm {
+      | Error(_) as x => x
+      | Ok(node, nextReader) => nextReader->doReadList(nodes->push(node))
+      }
     }
   }
   doReadList(reader->inc, [])
 }
 and readVector = (reader, node): readRes => {
-  let rec doReadVector = (reader, nodes: array<ast>) => {
-    switch reader->readForm {
-    | Error(_) as x => x
-    | Ok({data: MalAtom("]")}, nextReader) =>
-      Ok({loc: node.loc, data: MalVector(nodes)}, nextReader)
-    | Ok(node, nextReader) => nextReader->doReadVector(nodes->push(node))
+  let rec doReadVector = (reader, nodes: array<Ast.t>): readRes => {
+    switch reader->peek {
+    | None => Error(EOF)
+    | Some({data: CloseBracket}) => Ok({loc: node.loc, data: MalVector(nodes)}, reader->inc)
+    | Some(_) =>
+      switch reader->readForm {
+      | Error(_) as x => x
+      | Ok(node, nextReader) => nextReader->doReadVector(nodes->push(node))
+      }
     }
   }
   doReadVector(reader->inc, [])
 }
 and readHashMap = (reader, node): readRes => {
-  let rec doReadHashMap = (reader, nodes: array<hash>) => {
-    switch reader->readForm {
-    | Error(_) as x => x
-    | Ok({data: MalAtom("}")}, nextReader) =>
-      Ok({loc: node.loc, data: MalHashMap(nodes)}, nextReader)
-    | Ok(key, nextReader) =>
-      switch nextReader->readForm {
+  let rec doReadHashMap = (reader, nodes: array<Ast.hash>): readRes => {
+    switch reader->peek {
+    | None => Error(EOF)
+    | Some({data: CloseBrace}) => Ok({loc: node.loc, data: MalHashMap(nodes)}, reader->inc)
+    | Some(_) =>
+      switch reader->readForm {
       | Error(_) as x => x
-      | Ok(value, finalReader) => finalReader->doReadHashMap(nodes->push({key: key, value: value}))
+      | Ok(key, nextReader) =>
+        switch nextReader->readForm {
+        | Error(_) as x => x
+        | Ok(value, finalReader) =>
+          finalReader->doReadHashMap(nodes->push({key: key, value: value}))
+        }
       }
     }
   }
@@ -323,7 +325,7 @@ and readWithMeta = (reader, node): readRes => {
   }
 }
 
-let readStr = (input: string): result<ast, readError> => {
+let readStr = (input: string): result<Ast.t, readError> => {
   Logger.debug2("readStr", input)
   switch input->make {
   | Ok(reader) =>
