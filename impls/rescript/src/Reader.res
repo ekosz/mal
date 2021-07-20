@@ -169,7 +169,7 @@ let tokenize = (str: string): result<array<token>, readError> => {
 }
 
 type reader = {pos: int, tokens: array<token>}
-type readRes = result<(Types.Types.t, reader), readError>
+type readRes = result<(Types.mal_type, reader), readError>
 
 let make = input =>
   switch tokenize(input) {

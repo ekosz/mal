@@ -39,7 +39,8 @@ let printReadError = (err: Reader.readError): string => {
 
 let printEvalError = (err: Eval.evalError): string => {
   switch err {
-  | Eval.SymbolNotFound(name) => `ERR: Cannot find symbol "${name}"`
-  | RuntimeError(message) => `Runtime ERR: "${message}"`
+  | Eval.SymbolNotFound(name) => `ERR: Symbol '${name}' not found`
+  | RuntimeError(message) => `Runtime ERR: ${message}`
+  | InvalidArgs(message) => `Invalid Agument ERR: ${message}`
   }
 }

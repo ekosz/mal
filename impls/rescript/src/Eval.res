@@ -1,1 +1,1 @@
-type evalError = SymbolNotFound(string) | RuntimeError(string)
+type evalError = SymbolNotFound(string) | InvalidArgs(string) | RuntimeError(string)
